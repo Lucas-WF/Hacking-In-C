@@ -2,6 +2,7 @@
 #include <Windows.h>
 #include <TlHelp32.h>
 #include <winbase.h>
+#include <fstream>
 
 DWORD getPID(const wchar_t* procName);
 
@@ -16,7 +17,7 @@ int main(int argc, char* argv[]) {
     DWORD pid = getPID(proc);
 
     if (pid == 0) {
-        fprintf(stderr, "No PID was found!");
+        std::cout << "No PID was found!" << "\n";
         std::cin.get();
         return 1;
     }
@@ -25,14 +26,24 @@ int main(int argc, char* argv[]) {
     DWORD result = GetCurrentDirectory(sizeof(DllpathC) / sizeof(DllpathC[0]), DllpathC);
 
     if (result == 0) {
-        fprintf(stderr, "Fail");
+        std::cout << "Fail" << "\n";
         std::cin.get();
         return 1;
     }
 
     wcscat_s(DllpathC, L"\\DLL_Test.dll");
 
-    std::wcout << DllpathC;
+    std::ifstream file;
+
+    file.open(DllpathC);
+
+    if (!file) {
+        std::cout << "Error when openning the DLL" << "\n";
+        std::cin.get();
+        return 1;
+    }
+
+    std::wcout << "DLL path: " << DllpathC << "\n";
 
     /*
     if(argv[2] != NULL) {
@@ -44,7 +55,7 @@ int main(int argc, char* argv[]) {
     HANDLE hProc = OpenProcess(PROCESS_CREATE_THREAD | PROCESS_VM_READ | PROCESS_VM_WRITE | PROCESS_VM_OPERATION | PROCESS_QUERY_INFORMATION, FALSE, pid);
 
     if (hProc == NULL) {
-        fprintf(stderr, "Error when openning the Proccess");
+        std::cout << "Error when openning the Proccess" << "\n";
         std::cin.get();
         return 1;
     }
@@ -57,7 +68,7 @@ int main(int argc, char* argv[]) {
 
     if (is_target64 != is_injector64) {
         CloseHandle(hProc);
-        fprintf(stderr, "Process mismatching");
+        std::cout << "Process mismatching!" << "\n";
         std::cin.get();
         return 1;
     }
@@ -67,7 +78,7 @@ int main(int argc, char* argv[]) {
 
     if (hModule == NULL) {
         CloseHandle(hProc);
-        fprintf(stderr, "Error on getting the kernel32");
+        std::cout << "Error on getting the kernel32" << GetLastError() << "\n";
         std::cin.get();
         return 1;
     }
@@ -76,7 +87,7 @@ int main(int argc, char* argv[]) {
 
     if (hLoadLib == NULL) {
         CloseHandle(hProc);
-        fprintf(stderr, "Error on getting the LoadLibraryW");
+        std::cout << "Error on getting the LoadLibraryW" << GetLastError() << "\n";
         std::cin.get();
         return 1;
     }
@@ -89,14 +100,19 @@ int main(int argc, char* argv[]) {
     LPVOID pBaseAddr = VirtualAllocEx(hProc, NULL, path_size, MEM_COMMIT | MEM_RESERVE, PAGE_EXECUTE_READWRITE);
 
     if (pBaseAddr == NULL) {
-        fprintf(stderr, "Error on commiting the memory");
+        CloseHandle(hProc);
+        std::cout << "Error on commiting the memory" << GetLastError() << "\n";
         std::cin.get();
         return 1;
     }
 
+    std::cout << "Load at: " << pBaseAddr << "\n";
+
     // Writes data to an area of memory in a specified process
     if (WriteProcessMemory(hProc, pBaseAddr, DllpathC, path_size, NULL) == 0) {
-        fprintf(stderr, "Error on writing data to the memory");
+        VirtualFreeEx(hProc, pBaseAddr, 0, MEM_RELEASE);
+        CloseHandle(hProc);
+        std::cout << "Error on writing data to the memory" << GetLastError() << "\n";
         std::cin.get();
         return 1;
     }
@@ -104,14 +120,14 @@ int main(int argc, char* argv[]) {
     HANDLE hLoadThread = CreateRemoteThread(hProc, NULL, 0, (LPTHREAD_START_ROUTINE)hLoadLib, pBaseAddr, 0, NULL);
 
     if (hLoadThread == NULL) {
-        fprintf(stderr, "Error when creating a thread");
+        VirtualFreeEx(hProc, pBaseAddr, 0, MEM_RELEASE);
+        CloseHandle(hProc);
+        std::cout << "Error when creating a thread" << GetLastError() << "\n";
         std::cin.get();
         return 1;
     }
 
-    fprintf(stdout, "I'm here");
-
-    Sleep(1000);
+    std::cout << "Loading library\n";
 
     WaitForSingleObject(hLoadThread, INFINITE);
 
@@ -148,14 +164,14 @@ DWORD getPID(const wchar_t* procName) {
 
     do {
         std::wcout << pe32.szExeFile;
-        std::cout << ": " << pe32.th32ProcessID << std::endl;
+        std::cout << ": " << pe32.th32ProcessID << "\n";
         // Check if the process name matches (The pe32 isn't a wchar* in g++)
-        if (wcscmp(pe32.szExeFile, procName) == 0) {
-            CloseHandle(hProcSnap);
-            return pe32.th32ProcessID;
+        if (_wcsicmp(pe32.szExeFile, procName) == 0) {
+            break;
         }
     } while (Process32Next(hProcSnap, &pe32));
 
     CloseHandle(hProcSnap);
+    return pe32.th32ProcessID;
     return 0;
 }
